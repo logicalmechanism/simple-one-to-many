@@ -1,0 +1,1 @@
+../../cardano-node/state-node-testnet/node.socket

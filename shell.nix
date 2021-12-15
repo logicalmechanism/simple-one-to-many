@@ -1,5 +1,5 @@
 let
-  packages = import ./.;
+  packages = import ./royalty-payout;
   inherit (packages) pkgs plutus-starter;
   inherit (plutus-starter) haskell;
 

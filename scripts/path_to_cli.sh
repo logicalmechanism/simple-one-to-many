@@ -1,0 +1,1 @@
+../../cardano-node/cardano-cli-testnet/bin/cardano-cli
