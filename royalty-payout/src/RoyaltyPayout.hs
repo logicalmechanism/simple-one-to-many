@@ -43,7 +43,7 @@ import qualified Ledger.Typed.Scripts      as Scripts
 import qualified Ledger.Tx                 as Tx
 
 import           Playground.Contract
-import Wallet.Emulator.Wallet
+import Wallet.Emulator.Wallet              as Emulator
 
 import qualified PlutusTx
 import           PlutusTx.Prelude          as P hiding (Semigroup (..), unless, Applicative (..))
@@ -218,10 +218,10 @@ sumList = List.foldr (P.+) 0
 
 -- create a list of must pay to pubkeys
 createTX :: [PubKeyHash] -> [Integer] -> PubKeyHash -> Value -> Constraints.TxConstraints i o
-createTX [] [] pkh val = Constraints.mustPayToPubKey pkh val
-createTX [] _ pkh val  = Constraints.mustPayToPubKey pkh val
-createTX _ [] pkh val  = Constraints.mustPayToPubKey pkh val
-createTX (x:xs) (y:ys) _pkh _val  = Constraints.mustPayToPubKey x (Ada.lovelaceValueOf y) Prelude.<> createTX xs ys _pkh _val
+createTX []     []     pkh val = Constraints.mustPayToPubKey pkh val
+createTX []     _      pkh val = Constraints.mustPayToPubKey pkh val
+createTX _      []     pkh val = Constraints.mustPayToPubKey pkh val
+createTX (x:xs) (y:ys) pkh val = Constraints.mustPayToPubKey x (Ada.lovelaceValueOf y) Prelude.<> createTX xs ys pkh val
 
 -------------------------------------------------------------------------------
 -- | TRACES
@@ -229,6 +229,14 @@ createTX (x:xs) (y:ys) _pkh _val  = Constraints.mustPayToPubKey x (Ada.lovelaceV
 testTracing :: IO ()
 testTracing = Trace.runEmulatorTraceIO makeSaleTrace
 
+smoosher :: Wallet
+smoosher = Emulator.knownWallet 0
+
+exploder :: Wallet
+exploder = Emulator.knownWallet 1
+
 makeSaleTrace :: Trace.EmulatorTrace ()
 makeSaleTrace = do
+  -- hdl <- Trace.activateContractWallet smoosher contract  
   void $ Trace.waitNSlots 0
+-- 
