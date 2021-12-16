@@ -24,6 +24,8 @@ module RoyaltyPayout
   , explode
   , Schema
   , contract
+  , smoosher
+  , sPkh
   ) where
 
 import           Cardano.Api.Shelley       (PlutusScript (..), PlutusScriptV1)
@@ -41,9 +43,11 @@ import           Ledger                    hiding ( singleton )
 import qualified Ledger.Constraints        as Constraints
 import qualified Ledger.Typed.Scripts      as Scripts
 import qualified Ledger.Tx                 as Tx
-
+import qualified Ledger.CardanoWallet      as CW
 import           Playground.Contract
-import qualified Wallet.Emulator.Wallet    as W
+
+import Wallet.Emulator.Wallet as W
+
 import qualified PlutusTx
 import           PlutusTx.Prelude          as P hiding (Semigroup (..), unless, Applicative (..))
 import           PlutusTx.List             as List
@@ -214,9 +218,11 @@ explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPK
   scrOutputs        <- utxosAt $ Ledger.scriptAddress validator
   miner             <- Plutus.Contract.ownPubKeyHash
   let mandoPayout   = Ada.lovelaceValueOf cdtProfit
+  logInfo @Prelude.String "find the tx"
   let saleDatum     = CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit}
   let flt _ ciTxOut = P.either P.id Ledger.datumHash (Tx._ciTxOutDatum ciTxOut) P.== Ledger.datumHash (Datum (PlutusTx.toBuiltinData saleDatum))
   let tx            = collectFromScriptFilter flt scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
+  logInfo @Prelude.String "submit the tx"
   void $ submitTxConstraints (typedValidator $ ContractParams {}) tx
   
 -- | sum a list
@@ -236,21 +242,21 @@ createTX (x:xs) (y:ys) pkh val = Constraints.mustPayToPubKey x (Ada.lovelaceValu
 testTracing :: IO ()
 testTracing = Trace.runEmulatorTraceIO smooshTheBall
 
-smoosher :: Wallet
-smoosher = W.knownWallet 0
+smoosher :: CW.MockWallet
+smoosher = CW.knownWallet 1
+
+exploder :: CW.MockWallet
+exploder = CW.knownWallet 2
 
 sPkh :: PubKeyHash
-sPkh = W.walletPubKeyHash smoosher
-
-exploder :: Wallet
-exploder = W.knownWallet 1
+sPkh = CW.pubKeyHash smoosher
 
 ePkh :: PubKeyHash
-ePkh = W.walletPubKeyHash smoosher
+ePkh = CW.pubKeyHash exploder
 
 smooshTheBall :: Trace.EmulatorTrace ()
 smooshTheBall = do
-  hdl <- Trace.activateContractWallet smoosher (contract @ContractError)
+  hdl <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
   let datum = CustomDatumType { cdtRoyaltyPKHs = [sPkh, ePkh], cdtPayouts = [4567890, 2344570], cdtProfit = 1234567 }
   Trace.callEndpoint @"smoosh" hdl datum
   void $ Trace.waitNSlots 1
