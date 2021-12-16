@@ -59,7 +59,7 @@ writeCostingScripts = do
   let config = ScriptsConfig { scPath = "/tmp/plutus-costing-outputs/", scCommand = cmd }
       cmd    = Scripts { unappliedValidators = FullyAppliedValidators }
       -- Note: Here you can use any trace you wish.
-      trace  = smooshTheBall 
+      trace  = smooshTheBallThenExplode
   (totalSize, exBudget) <- writeScriptsTo config "game" trace def
   putStrLn $ "Total size = " <> show totalSize
   putStrLn $ "ExBudget = " <> show exBudget

@@ -18,7 +18,7 @@
 module RoyaltyPayout
   ( royaltyPayoutScript
   , royaltyPayoutScriptShortBs
-  , smooshTheBall
+  , smooshTheBallThenExplode
   , testTracing
   , smoosh
   , explode
@@ -26,6 +26,8 @@ module RoyaltyPayout
   , contract
   , smoosher
   , sPkh
+  , baseQ
+  , numDigits
   ) where
 
 import           Cardano.Api.Shelley       (PlutusScript (..), PlutusScriptV1)
@@ -51,6 +53,7 @@ import Wallet.Emulator.Wallet as W
 import qualified PlutusTx
 import           PlutusTx.Prelude          as P hiding (Semigroup (..), unless, Applicative (..))
 import           PlutusTx.List             as List
+import           PlutusTx.Builtins         as Bi
 
 import           Plutus.Contract
 import qualified Plutus.Trace.Emulator     as Trace
@@ -58,6 +61,7 @@ import qualified Plutus.Trace.Emulator     as Trace
 import qualified Plutus.V1.Ledger.Ada      as Ada
 import qualified Plutus.V1.Ledger.Scripts  as Plutus
 import qualified Plutus.V1.Ledger.Contexts as Contexts
+import qualified Plutus.V1.Ledger.Value as Value
 
 {- |
   Author   : The Ancient Kraken
@@ -94,7 +98,8 @@ PlutusTx.makeLift ''ContractParams
 -------------------------------------------------------------------------------
 -- | Create the redeemer parameters data object.
 -------------------------------------------------------------------------------
-data CustomRedeemerType = CustomRedeemerType {}
+data CustomRedeemerType = CustomRedeemerType
+  {}
 PlutusTx.unstableMakeIsData ''CustomRedeemerType
 PlutusTx.makeLift ''CustomRedeemerType
 
@@ -114,15 +119,15 @@ mkValidator _ datum _ context = oneScriptInput P.&& checkAllPayments (cdtRoyalty
 
     -- Value paid to has to be exact ada
     checkValuePaidTo :: PubKeyHash -> Integer -> Bool
-    checkValuePaidTo x y = Contexts.valuePaidTo info x P./= Ada.lovelaceValueOf y
+    checkValuePaidTo pkh amt = traceIfFalse "Not Equal" $ Value.geq (Contexts.valuePaidTo info pkh) (Ada.lovelaceValueOf amt)
     
     checkAllPayments :: [PubKeyHash] -> [Integer] -> Bool
     checkAllPayments []     []     = checkValuePaidTo txSigner (cdtProfit datum)
     checkAllPayments []     _      = checkValuePaidTo txSigner (cdtProfit datum)
     checkAllPayments _      []     = checkValuePaidTo txSigner (cdtProfit datum)
     checkAllPayments (x:xs) (y:ys)
-      | checkValuePaidTo x y       = False
-      | otherwise                  = checkAllPayments xs ys
+      | checkValuePaidTo x y P.== True = checkAllPayments xs ys
+      | otherwise                      = False
 
     -- Force a single utxo has a datum hash in the inputs.
     oneScriptInput :: Bool
@@ -151,7 +156,7 @@ typedValidator cp = Scripts.mkTypedValidator @Typed
 -- | Define The Validator Here
 -------------------------------------------------------------------------------
 validator :: Plutus.Validator
-validator = Scripts.validatorScript (typedValidator ContractParams {})
+validator = Scripts.validatorScript (typedValidator $ ContractParams {})
 
 -------------------------------------------------------------------------------
 -- | The code below is required for the plutus script compile.
@@ -200,16 +205,16 @@ checkDatumInputs pkhs amts pro = do
 -- | The buy endpoint.
 smoosh :: AsContractError e => Promise () Schema e ()
 smoosh =  endpoint @"smoosh" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPKHs cdtPayouts cdtProfit) -> do
-  logInfo @Prelude.String "smoosh the ada ball"
+  logInfo @Prelude.String "Attempt to smoosh the ball"
   -- Check the datum inputs
   if checkDatumInputs cdtRoyaltyPKHs cdtPayouts cdtProfit
   then do
-    logInfo @Prelude.String "Add the fee"
+    logInfo @Prelude.String "add the fee"
     let totalPlusFee = sumList cdtPayouts P.+ cdtProfit
     logInfo @Prelude.String "submit the tx"
     void $ submitTxConstraints (typedValidator $ ContractParams {}) $ Constraints.mustPayToTheScript (CustomDatumType cdtRoyaltyPKHs cdtPayouts cdtProfit) (Ada.lovelaceValueOf totalPlusFee)
   else
-    logInfo @Prelude.String "The ball has crumbled"
+    logInfo @Prelude.String "The ball has crumbled due to bad inputs."
 
 -- | The remove endpoint.
 explode :: AsContractError e => Promise () Schema e ()
@@ -219,11 +224,17 @@ explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPK
   miner             <- Plutus.Contract.ownPubKeyHash
   let mandoPayout   = Ada.lovelaceValueOf cdtProfit
   logInfo @Prelude.String "find the tx"
-  let saleDatum     = CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit}
-  let flt _ ciTxOut = P.either P.id Ledger.datumHash (Tx._ciTxOutDatum ciTxOut) P.== Ledger.datumHash (Datum (PlutusTx.toBuiltinData saleDatum))
-  let tx            = collectFromScriptFilter flt scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
+  -- let saleDatum     = CustomDatumType { cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit }
+  -- let flt _ ciTxOut = P.either P.id Ledger.datumHash (Tx._ciTxOutDatum ciTxOut) P.== Ledger.datumHash (Datum (PlutusTx.toBuiltinData saleDatum))
+  -- let tx            = collectFromScriptFilter flt scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
+  
+  let tx = collectFromScript scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
+  let inst = typedValidator $ ContractParams {}
+      lookups = Constraints.typedValidatorLookups inst Prelude.<> Constraints.unspentOutputs scrOutputs
   logInfo @Prelude.String "submit the tx"
-  void $ submitTxConstraints (typedValidator $ ContractParams {}) tx
+  void $ submitTxConstraintsWith lookups tx
+
+  -- void $ submitTxConstraints (typedValidator $ ContractParams {}) tx
   
 -- | sum a list
 sumList :: [Integer] -> Integer
@@ -240,7 +251,7 @@ createTX (x:xs) (y:ys) pkh val = Constraints.mustPayToPubKey x (Ada.lovelaceValu
 -- | TRACES
 -------------------------------------------------------------------------------
 testTracing :: IO ()
-testTracing = Trace.runEmulatorTraceIO smooshTheBall
+testTracing = Trace.runEmulatorTraceIO smooshTheBallThenExplode
 
 smoosher :: CW.MockWallet
 smoosher = CW.knownWallet 1
@@ -254,9 +265,30 @@ sPkh = CW.pubKeyHash smoosher
 ePkh :: PubKeyHash
 ePkh = CW.pubKeyHash exploder
 
-smooshTheBall :: Trace.EmulatorTrace ()
-smooshTheBall = do
-  hdl <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
-  let datum = CustomDatumType { cdtRoyaltyPKHs = [sPkh, ePkh], cdtPayouts = [4567890, 2344570], cdtProfit = 1234567 }
-  Trace.callEndpoint @"smoosh" hdl datum
+payouts :: Integer -> [PubKeyHash]
+payouts c = payouts' c []
+  where
+    payouts' :: Integer -> [PubKeyHash] -> [PubKeyHash]
+    payouts' 0 pkhs = pkhs
+    payouts' c' pkhs = payouts' (c' P.- 1) (CW.pubKeyHash (CW.knownWallet c') : pkhs)
+
+-- | Convert a base 10 integer into base q as a list of integers.
+baseQ :: Integer -> Integer -> [Integer]
+baseQ number base = P.map (1200000 P.*) $ P.map (2 P.+) $ baseQ' number base []
+  where
+  baseQ' 0 _base list = list
+  baseQ' number' base' list = baseQ' (Bi.divideInteger number' base') base' (Bi.modInteger number' base' : list)
+
+numDigits :: Integer -> Integer -> Integer
+numDigits number base = (base Prelude.^ (number P.- 1)) P.+ 20
+
+smooshTheBallThenExplode :: Trace.EmulatorTrace ()
+smooshTheBallThenExplode = do
+  hdl1 <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
+  hdl2 <- Trace.activateContractWallet (W.toMockWallet exploder) (contract @ContractError)
+  let users = 1
+  let datum = CustomDatumType { cdtRoyaltyPKHs = payouts users, cdtPayouts = baseQ (numDigits users users) users, cdtProfit = 1234567 }
+  -- Trace.callEndpoint @"smoosh" hdl1 datum
+  -- _ <-  Trace.waitNSlots 1
+  -- Trace.callEndpoint @"explode" hdl2 datum
   void $ Trace.waitNSlots 1
