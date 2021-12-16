@@ -99,7 +99,7 @@ PlutusTx.makeLift ''CustomRedeemerType
 -------------------------------------------------------------------------------
 {-# INLINABLE mkValidator #-}
 mkValidator :: ContractParams -> CustomDatumType -> CustomRedeemerType -> ScriptContext -> Bool
-mkValidator _ datum _ context = checkAllPayments (cdtRoyaltyPKHs datum) (cdtPayouts datum)
+mkValidator _ datum _ context = oneScriptInput P.&& checkAllPayments (cdtRoyaltyPKHs datum) (cdtPayouts datum)
   where
     info :: TxInfo
     info = Contexts.scriptContextTxInfo context
@@ -108,17 +108,23 @@ mkValidator _ datum _ context = checkAllPayments (cdtRoyaltyPKHs datum) (cdtPayo
     txSigner :: PubKeyHash
     txSigner = List.head $ txInfoSignatories info
 
+    -- Value paid to has to be exact ada
     checkValuePaidTo :: PubKeyHash -> Integer -> Bool
     checkValuePaidTo x y = Contexts.valuePaidTo info x P./= Ada.lovelaceValueOf y
     
     checkAllPayments :: [PubKeyHash] -> [Integer] -> Bool
-    checkAllPayments [] [] = checkValuePaidTo txSigner (cdtProfit datum)
-    checkAllPayments [] _  = checkValuePaidTo txSigner (cdtProfit datum)
-    checkAllPayments _  [] = checkValuePaidTo txSigner (cdtProfit datum)
+    checkAllPayments []     []     = checkValuePaidTo txSigner (cdtProfit datum)
+    checkAllPayments []     _      = checkValuePaidTo txSigner (cdtProfit datum)
+    checkAllPayments _      []     = checkValuePaidTo txSigner (cdtProfit datum)
     checkAllPayments (x:xs) (y:ys)
-      | checkValuePaidTo x y = False
-      | otherwise            = checkAllPayments xs ys
-    
+      | checkValuePaidTo x y       = False
+      | otherwise                  = checkAllPayments xs ys
+
+    -- Force a single utxo has a datum hash in the inputs.
+    oneScriptInput :: Bool
+    oneScriptInput = length (P.mapMaybe txOutDatumHash (P.map txInInfoResolved $ txInfoInputs info)) P.<= 1
+
+        
 -------------------------------------------------------------------------------
 -- | This determines the data type for Datum and Redeemer.
 -------------------------------------------------------------------------------
