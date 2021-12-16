@@ -18,7 +18,7 @@
 module RoyaltyPayout
   ( royaltyPayoutScript
   , royaltyPayoutScriptShortBs
-  , makeSaleTrace
+  , smooshTheBall
   , testTracing
   , smoosh
   , explode
@@ -43,14 +43,12 @@ import qualified Ledger.Typed.Scripts      as Scripts
 import qualified Ledger.Tx                 as Tx
 
 import           Playground.Contract
-import Wallet.Emulator.Wallet              as Emulator
-
+import qualified Wallet.Emulator.Wallet    as W
 import qualified PlutusTx
 import           PlutusTx.Prelude          as P hiding (Semigroup (..), unless, Applicative (..))
 import           PlutusTx.List             as List
 
 import           Plutus.Contract
--- import           Plutus.Contract.Trace     as X
 import qualified Plutus.Trace.Emulator     as Trace
 
 import qualified Plutus.V1.Ledger.Ada      as Ada
@@ -168,6 +166,7 @@ type Schema =
 minimumAmt :: Integer
 minimumAmt = 1234567 -- probably should be the real min utxo
 
+
 contract :: AsContractError e => Contract () Schema e ()
 contract = selectList [smoosh, explode] >> contract
 
@@ -195,10 +194,12 @@ smoosh =  endpoint @"smoosh" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPKHs
   -- Check the datum inputs
   if checkDatumInputs cdtRoyaltyPKHs cdtPayouts cdtProfit
   then do
+    logInfo @Prelude.String "Add the fee"
     let totalPlusFee = sumList cdtPayouts P.+ cdtProfit
+    logInfo @Prelude.String "submit the tx"
     void $ submitTxConstraints (typedValidator $ ContractParams {}) $ Constraints.mustPayToTheScript (CustomDatumType cdtRoyaltyPKHs cdtPayouts cdtProfit) (Ada.lovelaceValueOf totalPlusFee)
   else
-    traceError "Datum Input Values Are Incorrect."
+    logInfo @Prelude.String "The ball has crumbled"
 
 -- | The remove endpoint.
 explode :: AsContractError e => Promise () Schema e ()
@@ -227,16 +228,23 @@ createTX (x:xs) (y:ys) pkh val = Constraints.mustPayToPubKey x (Ada.lovelaceValu
 -- | TRACES
 -------------------------------------------------------------------------------
 testTracing :: IO ()
-testTracing = Trace.runEmulatorTraceIO makeSaleTrace
+testTracing = Trace.runEmulatorTraceIO smooshTheBall
 
 smoosher :: Wallet
-smoosher = Emulator.knownWallet 0
+smoosher = W.knownWallet 0
+
+sPkh :: PubKeyHash
+sPkh = W.walletPubKeyHash smoosher
 
 exploder :: Wallet
-exploder = Emulator.knownWallet 1
+exploder = W.knownWallet 1
 
-makeSaleTrace :: Trace.EmulatorTrace ()
-makeSaleTrace = do
-  -- hdl <- Trace.activateContractWallet smoosher contract  
-  void $ Trace.waitNSlots 0
--- 
+ePkh :: PubKeyHash
+ePkh = W.walletPubKeyHash smoosher
+
+smooshTheBall :: Trace.EmulatorTrace ()
+smooshTheBall = do
+  hdl <- Trace.activateContractWallet smoosher (contract @ContractError)
+  let datum = CustomDatumType { cdtRoyaltyPKHs = [sPkh, ePkh], cdtPayouts = [4567890, 2344570], cdtProfit = 1234567 }
+  Trace.callEndpoint @"smoosh" hdl datum
+  void $ Trace.waitNSlots 1

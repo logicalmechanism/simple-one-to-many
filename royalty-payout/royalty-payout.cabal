@@ -67,6 +67,7 @@ library
                       , serialise
                       , text
                       , containers
+                      , freer-extras
 
   ghc-options: -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas
 
