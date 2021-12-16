@@ -18,3 +18,5 @@ cabal run plutus-starter-pab
 ## Goals
 
 Trace and pab scripts soon to come.
+
+![alt text](ADABall.png)
