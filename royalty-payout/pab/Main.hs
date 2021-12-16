@@ -10,7 +10,6 @@
 {-# LANGUAGE TypeOperators      #-}
 
 module Main(main, writeCostingScripts) where
-
 import           Control.Monad                       (void)
 import           Control.Monad.Freer                 (interpret)
 import           Control.Monad.IO.Class              (MonadIO (..))
@@ -44,7 +43,6 @@ main = void $ Simulator.runSimulationWith handlers $ do
     -- etc.
     -- That way, the simulation gets to a predefined state and you don't have to
     -- use the HTTP API for setup.
-
     -- Pressing enter results in the balances being printed
     void $ liftIO getLine
 

@@ -19,6 +19,7 @@ module RoyaltyPayout
   ( royaltyPayoutScript
   , royaltyPayoutScriptShortBs
   , makeSaleTrace
+  , testTracing
   , smoosh
   , explode
   , Schema
@@ -27,8 +28,8 @@ module RoyaltyPayout
 
 import           Cardano.Api.Shelley       (PlutusScript (..), PlutusScriptV1)
 
-import Codec.Serialise ( serialise )
-import           Control.Monad        (void)
+import           Codec.Serialise           ( serialise )
+import           Control.Monad             ( void )
 
 import qualified Data.ByteString.Lazy      as LBS
 import qualified Data.ByteString.Short     as SBS
@@ -36,22 +37,22 @@ import qualified Data.ByteString.Short     as SBS
 import qualified Prelude                   hiding (($))
 
 
-import           Ledger                    hiding (singleton)
+import           Ledger                    hiding ( singleton )
 import qualified Ledger.Constraints        as Constraints
 import qualified Ledger.Typed.Scripts      as Scripts
 import qualified Ledger.Tx                 as Tx
 
 import           Playground.Contract
-import           Plutus.Contract.Trace     as X
+import Wallet.Emulator.Wallet
 
 import qualified PlutusTx
-import           PlutusTx.Prelude          as P hiding (Semigroup (..), unless)
-import           PlutusTx.Prelude          hiding (Applicative (..))
+import           PlutusTx.Prelude          as P hiding (Semigroup (..), unless, Applicative (..))
 import           PlutusTx.List             as List
 
 import           Plutus.Contract
-import           Plutus.Trace.Emulator     (EmulatorTrace)
+-- import           Plutus.Contract.Trace     as X
 import qualified Plutus.Trace.Emulator     as Trace
+
 import qualified Plutus.V1.Ledger.Ada      as Ada
 import qualified Plutus.V1.Ledger.Scripts  as Plutus
 import qualified Plutus.V1.Ledger.Contexts as Contexts
@@ -61,15 +62,10 @@ import qualified Plutus.V1.Ledger.Contexts as Contexts
   Copyright: 2021
   Version  : Rev 0
 
-  cardano-cli 1.31.0 - linux-x86_64 - ghc-8.10
-  git rev 2cbe363874d0261bc62f52185cf23ed492cf4859
+  cardano-cli 1.32.1 - linux-x86_64 - ghc-8.10
+  git rev 4f65fb9a27aa7e3a1873ab4211e412af780a3648
 
-  Assume pure ADA and correct off chain.
-
-  It is the job of off chain code to create correct datum and tx.
-
-  A single pubkey can only be used once so sum the total ada the address
-  needs and send it as once entry.
+  Ada Balls
 -}
 
 -------------------------------------------------------------------------------
@@ -110,13 +106,17 @@ mkValidator _ datum _ context = checkAllPayments (cdtRoyaltyPKHs datum) (cdtPayo
     info :: TxInfo
     info = Contexts.scriptContextTxInfo context
 
+    -- First signer is the single signer
+    txSigner :: PubKeyHash
+    txSigner = List.head $ txInfoSignatories info
+
     checkValuePaidTo :: PubKeyHash -> Integer -> Bool
     checkValuePaidTo x y = Contexts.valuePaidTo info x P./= Ada.lovelaceValueOf y
     
     checkAllPayments :: [PubKeyHash] -> [Integer] -> Bool
-    checkAllPayments [] [] = True
-    checkAllPayments [] _  = True
-    checkAllPayments _  [] = True
+    checkAllPayments [] [] = checkValuePaidTo txSigner (cdtProfit datum)
+    checkAllPayments [] _  = checkValuePaidTo txSigner (cdtProfit datum)
+    checkAllPayments _  [] = checkValuePaidTo txSigner (cdtProfit datum)
     checkAllPayments (x:xs) (y:ys)
       | checkValuePaidTo x y = False
       | otherwise            = checkAllPayments xs ys
@@ -166,7 +166,7 @@ type Schema =
   Endpoint "explode" CustomDatumType
 
 minimumAmt :: Integer
-minimumAmt = 1234567
+minimumAmt = 1234567 -- probably should be the real min utxo
 
 contract :: AsContractError e => Contract () Schema e ()
 contract = selectList [smoosh, explode] >> contract
@@ -180,11 +180,11 @@ checkMinPayout (x:xs)
 -- | Put all the buy functions together here
 checkDatumInputs :: [PubKeyHash] -> [Integer] -> Integer -> Bool
 checkDatumInputs pkhs amts pro = do
-  { let a = traceIfFalse "Found Duplicates."     $ P.length (List.nub pkhs) P.== P.length pkhs
-  ; let b = traceIfFalse "Lengths Not Equal"     $ P.length pkhs P.== P.length amts
-  ; let c = traceIfFalse "A Payout Is Too Small" $ checkMinPayout amts
-  ; let d = traceIfFalse "Empty Data"            $ P.length pkhs P./= 0 P.&& P.length amts P./= 0
-  ; let e = traceIfFalse "Profit Is Too Small."  $ pro P.>= minimumAmt
+  { let a = traceIfFalse "Found Duplicates."     $ P.length (List.nub pkhs) P.== P.length pkhs    -- no duplicates
+  ; let b = traceIfFalse "Lengths Not Equal"     $ P.length pkhs P.== P.length amts               -- equal pkhs + vals
+  ; let c = traceIfFalse "A Payout Is Too Small" $ checkMinPayout amts                            -- min utxo required
+  ; let d = traceIfFalse "Empty Data"            $ P.length pkhs P./= 0 P.&& P.length amts P./= 0 -- no empty entries
+  ; let e = traceIfFalse "Profit Is Too Small."  $ pro P.== 0 P.|| pro P.>= minimumAmt            -- either no profit or min utxo
   ; P.all (P.==(True :: Bool)) [a,b,c,d,e]
   }
 
@@ -192,22 +192,24 @@ checkDatumInputs pkhs amts pro = do
 smoosh :: AsContractError e => Promise () Schema e ()
 smoosh =  endpoint @"smoosh" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPKHs cdtPayouts cdtProfit) -> do
   logInfo @Prelude.String "smoosh the ada ball"
+  -- Check the datum inputs
   if checkDatumInputs cdtRoyaltyPKHs cdtPayouts cdtProfit
   then do
     let totalPlusFee = sumList cdtPayouts P.+ cdtProfit
     void $ submitTxConstraints (typedValidator $ ContractParams {}) $ Constraints.mustPayToTheScript (CustomDatumType cdtRoyaltyPKHs cdtPayouts cdtProfit) (Ada.lovelaceValueOf totalPlusFee)
   else
-    traceError "Datum Values Are Incorrect."
+    traceError "Datum Input Values Are Incorrect."
 
 -- | The remove endpoint.
 explode :: AsContractError e => Promise () Schema e ()
 explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPKHs cdtPayouts cdtProfit) -> do
+  logInfo @Prelude.String "explode the ada ball"
   scrOutputs        <- utxosAt $ Ledger.scriptAddress validator
   miner             <- Plutus.Contract.ownPubKeyHash
   let mandoPayout   = Ada.lovelaceValueOf cdtProfit
   let saleDatum     = CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit}
   let flt _ ciTxOut = P.either P.id Ledger.datumHash (Tx._ciTxOutDatum ciTxOut) P.== Ledger.datumHash (Datum (PlutusTx.toBuiltinData saleDatum))
-  let tx            = collectFromScriptFilter flt scrOutputs (CustomRedeemerType {}) PlutusTx.Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
+  let tx            = collectFromScriptFilter flt scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
   void $ submitTxConstraints (typedValidator $ ContractParams {}) tx
   
 -- | sum a list
@@ -219,22 +221,14 @@ createTX :: [PubKeyHash] -> [Integer] -> PubKeyHash -> Value -> Constraints.TxCo
 createTX [] [] pkh val = Constraints.mustPayToPubKey pkh val
 createTX [] _ pkh val  = Constraints.mustPayToPubKey pkh val
 createTX _ [] pkh val  = Constraints.mustPayToPubKey pkh val
-createTX (x:xs) (y:ys) _pkh _val  = Constraints.mustPayToPubKey x (Ada.lovelaceValueOf y) PlutusTx.Prelude.<> createTX xs ys _pkh _val
+createTX (x:xs) (y:ys) _pkh _val  = Constraints.mustPayToPubKey x (Ada.lovelaceValueOf y) Prelude.<> createTX xs ys _pkh _val
 
---------- TRACES -------
-makeSaleTrace :: EmulatorTrace ()
+-------------------------------------------------------------------------------
+-- | TRACES
+-------------------------------------------------------------------------------
+testTracing :: IO ()
+testTracing = Trace.runEmulatorTraceIO makeSaleTrace
+
+makeSaleTrace :: Trace.EmulatorTrace ()
 makeSaleTrace = do
-  let _ = X.knownWallet 1
-  void $ Trace.waitNSlots 1
-    -- Trace.callEndpoint @"sell" hdl (CustomDatumType (Ada.lovelaceValueOf 2000000) (Ada.lovelaceValueOf 10000000) False (walletPubKeyHash w1)  (Ada.lovelaceValueOf 125000000))
-  --     w2 = X.knownWallet 2
-  --     secret = "secret"
-
-  -- h1 <- Trace.activateContractWallet w1 (lock @ContractError)
-  -- void $ Trace.waitNSlots 1
-  -- Trace.callEndpoint @"locking" h1 (LockParams secret (Ada.adaValueOf 10))
-
-  -- h2 <- Trace.activateContractWallet w2 (guess @ContractError)
-  -- void $ Trace.waitNSlots 1
-  -- Trace.callEndpoint @"guessing" h2 (GuessParams secret)
-  -- void $ Trace.waitNSlots 1
+  void $ Trace.waitNSlots 0
