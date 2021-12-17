@@ -19,7 +19,6 @@ module RoyaltyPayout
   ( royaltyPayoutScript
   , royaltyPayoutScriptShortBs
   , smooshTheBallThenExplode
-  , testTracing
   , smoosh
   , explode
   , Schema
@@ -45,11 +44,10 @@ import qualified Prelude                   hiding (($))
 import           Ledger                    hiding ( singleton )
 import qualified Ledger.Constraints        as Constraints
 import qualified Ledger.Typed.Scripts      as Scripts
-import qualified Ledger.Tx                 as Tx
+-- import qualified Ledger.Tx                 as Tx
 import qualified Ledger.CardanoWallet      as CW
 import           Playground.Contract
 
-import Wallet.Emulator.Wallet as W
 
 import qualified PlutusTx
 import           PlutusTx.Prelude          as P hiding (Semigroup (..), unless, Applicative (..))
@@ -57,13 +55,16 @@ import           PlutusTx.List             as List
 import           PlutusTx.Builtins         as Bi
 
 import           Plutus.Contract
+import           Plutus.Contract.Test
 import qualified Plutus.Trace.Emulator     as Trace
 
 import qualified Plutus.V1.Ledger.Ada      as Ada
 import qualified Plutus.V1.Ledger.Scripts  as Plutus
 import qualified Plutus.V1.Ledger.Contexts as Contexts
-import qualified Plutus.V1.Ledger.Value as Value
+import qualified Plutus.V1.Ledger.Value    as Value
 
+import           Test.Tasty
+import           Wallet.Emulator.Wallet    as W
 {- |
   Author   : The Ancient Kraken
   Copyright: 2021
@@ -229,11 +230,11 @@ explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPK
   -- let flt _ ciTxOut = P.either P.id Ledger.datumHash (Tx._ciTxOutDatum ciTxOut) P.== Ledger.datumHash (Datum (PlutusTx.toBuiltinData saleDatum))
   -- let tx            = collectFromScriptFilter flt scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
   
-  let tx = collectFromScript scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
+  let txOut = collectFromScript scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
       inst = typedValidator $ ContractParams {}
       lookups = Constraints.typedValidatorLookups inst Prelude.<> Constraints.unspentOutputs scrOutputs
   logInfo @Prelude.String "submit the tx"
-  void $ submitTxConstraintsWith lookups tx
+  void $ submitTxConstraintsWith lookups txOut
   -- void $ submitTxConstraints (typedValidator $ ContractParams {}) tx
   
 -- | sum a list
@@ -250,8 +251,8 @@ createTX (x:xs) (y:ys) pkh val = Constraints.mustPayToPubKey x (Ada.lovelaceValu
 -------------------------------------------------------------------------------
 -- | TRACES
 -------------------------------------------------------------------------------
-testTracing :: IO ()
-testTracing = Trace.runEmulatorTraceIO smooshTheBallThenExplode
+-- testTracing :: IO ()
+-- testTracing = Trace.runEmulatorTraceIO smooshTheBallThenExplode
 
 smoosher :: CW.MockWallet
 smoosher = CW.knownWallet 1
@@ -282,15 +283,18 @@ baseQ number base = P.map (1200000 P.*) $ P.map (2 P.+) $ baseQ' number base []
 numDigits :: Integer -> Integer -> Integer
 numDigits number base = (base Prelude.^ (number P.- 1)) P.+ 20
 
-smooshTheBallThenExplode :: Trace.EmulatorTrace ()
-smooshTheBallThenExplode = do
-  hdl1 <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
-  hdl2 <- Trace.activateContractWallet (W.toMockWallet exploder) (contract @ContractError)
-  let users = 5
-  let groupPKHs = payouts users
-  let groupPayouts = baseQ (numDigits users users) users
-  let datum = CustomDatumType { cdtRoyaltyPKHs = groupPKHs, cdtPayouts = groupPayouts, cdtProfit = 1234567 }
-  Trace.callEndpoint @"smoosh" hdl1 datum
-  _ <-  Trace.waitNSlots 1
-  Trace.callEndpoint @"explode" hdl2 datum
-  void $ Trace.waitNSlots 1
+
+smooshTheBallThenExplode :: IO ()
+smooshTheBallThenExplode = Trace.runEmulatorTraceIO smooshTheBallThenExplode'
+  where 
+    smooshTheBallThenExplode' = do
+      hdl1 <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
+      hdl2 <- Trace.activateContractWallet (W.toMockWallet exploder) (contract @ContractError)
+      let users = 10
+      let groupPKHs = payouts users
+      let groupPayouts = baseQ (numDigits users users) users
+      let datum = CustomDatumType { cdtRoyaltyPKHs = groupPKHs, cdtPayouts = groupPayouts, cdtProfit = 1234567 }
+      Trace.callEndpoint @"smoosh" hdl1 datum
+      _ <-  Trace.waitNSlots 1
+      Trace.callEndpoint @"explode" hdl2 datum
+      void $ Trace.waitNSlots 1
