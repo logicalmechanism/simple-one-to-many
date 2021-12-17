@@ -26,12 +26,17 @@ cabal run plutus-starter-pab
 Trace test can be ran from the repl.
 
 ```
-cabal repl royalty-payment.cabal
+cabal repl royalty-payout.cabal
+```
 
-smooshTheBallThenExplode
+Try out these functions inside the repl.
+```
 smooshTheBall
+smooshFail
 explodeTheBall
 ```
+
+Use the ```:reload``` call to rebuild inside the repl for quick testing.
 
 
 ## Flow
