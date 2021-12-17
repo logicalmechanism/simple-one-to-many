@@ -28,6 +28,7 @@ module RoyaltyPayout
   , sPkh
   , baseQ
   , numDigits
+  , payouts
   ) where
 
 import           Cardano.Api.Shelley       (PlutusScript (..), PlutusScriptV1)
@@ -119,15 +120,15 @@ mkValidator _ datum _ context = oneScriptInput P.&& checkAllPayments (cdtRoyalty
 
     -- Value paid to has to be exact ada
     checkValuePaidTo :: PubKeyHash -> Integer -> Bool
-    checkValuePaidTo pkh amt = traceIfFalse "Not Equal" $ Value.geq (Contexts.valuePaidTo info pkh) (Ada.lovelaceValueOf amt)
+    checkValuePaidTo pkh amt = traceIfFalse "What is getting paid is incorrect." $ Value.geq (Contexts.valuePaidTo info pkh) (Ada.lovelaceValueOf amt)
     
     checkAllPayments :: [PubKeyHash] -> [Integer] -> Bool
     checkAllPayments []     []     = checkValuePaidTo txSigner (cdtProfit datum)
     checkAllPayments []     _      = checkValuePaidTo txSigner (cdtProfit datum)
     checkAllPayments _      []     = checkValuePaidTo txSigner (cdtProfit datum)
     checkAllPayments (x:xs) (y:ys)
-      | checkValuePaidTo x y P.== True = checkAllPayments xs ys
-      | otherwise                      = False
+      | checkValuePaidTo x y = checkAllPayments xs ys
+      | otherwise            = False
 
     -- Force a single utxo has a datum hash in the inputs.
     oneScriptInput :: Bool
@@ -193,12 +194,12 @@ checkMinPayout (x:xs)
 
 -- | Put all the buy functions together here
 checkDatumInputs :: [PubKeyHash] -> [Integer] -> Integer -> Bool
-checkDatumInputs pkhs amts pro = do
+checkDatumInputs pkhs amts prof = do
   { let a = traceIfFalse "Found Duplicates."     $ P.length (List.nub pkhs) P.== P.length pkhs    -- no duplicates
   ; let b = traceIfFalse "Lengths Not Equal"     $ P.length pkhs P.== P.length amts               -- equal pkhs + vals
   ; let c = traceIfFalse "A Payout Is Too Small" $ checkMinPayout amts                            -- min utxo required
   ; let d = traceIfFalse "Empty Data"            $ P.length pkhs P./= 0 P.&& P.length amts P./= 0 -- no empty entries
-  ; let e = traceIfFalse "Profit Is Too Small."  $ pro P.== 0 P.|| pro P.>= minimumAmt            -- either no profit or min utxo
+  ; let e = traceIfFalse "Profit Is Too Small."  $ prof P.>= minimumAmt                           -- min utxo
   ; P.all (P.==(True :: Bool)) [a,b,c,d,e]
   }
 
@@ -229,11 +230,10 @@ explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPK
   -- let tx            = collectFromScriptFilter flt scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
   
   let tx = collectFromScript scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
-  let inst = typedValidator $ ContractParams {}
+      inst = typedValidator $ ContractParams {}
       lookups = Constraints.typedValidatorLookups inst Prelude.<> Constraints.unspentOutputs scrOutputs
   logInfo @Prelude.String "submit the tx"
   void $ submitTxConstraintsWith lookups tx
-
   -- void $ submitTxConstraints (typedValidator $ ContractParams {}) tx
   
 -- | sum a list
@@ -286,9 +286,11 @@ smooshTheBallThenExplode :: Trace.EmulatorTrace ()
 smooshTheBallThenExplode = do
   hdl1 <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
   hdl2 <- Trace.activateContractWallet (W.toMockWallet exploder) (contract @ContractError)
-  let users = 1
-  let datum = CustomDatumType { cdtRoyaltyPKHs = payouts users, cdtPayouts = baseQ (numDigits users users) users, cdtProfit = 1234567 }
-  -- Trace.callEndpoint @"smoosh" hdl1 datum
-  -- _ <-  Trace.waitNSlots 1
-  -- Trace.callEndpoint @"explode" hdl2 datum
+  let users = 5
+  let groupPKHs = payouts users
+  let groupPayouts = baseQ (numDigits users users) users
+  let datum = CustomDatumType { cdtRoyaltyPKHs = groupPKHs, cdtPayouts = groupPayouts, cdtProfit = 1234567 }
+  Trace.callEndpoint @"smoosh" hdl1 datum
+  _ <-  Trace.waitNSlots 1
+  Trace.callEndpoint @"explode" hdl2 datum
   void $ Trace.waitNSlots 1
