@@ -19,6 +19,8 @@ module RoyaltyPayout
   ( royaltyPayoutScript
   , royaltyPayoutScriptShortBs
   , smooshTheBallThenExplode
+  , smooshTheBall
+  , explodeTheBall
   , smoosh
   , explode
   , Schema
@@ -119,9 +121,9 @@ mkValidator _ datum _ context = oneScriptInput P.&& checkAllPayments (cdtRoyalty
     txSigner :: PubKeyHash
     txSigner = List.head $ txInfoSignatories info
 
-    -- Value paid to has to be exact ada
+    -- Value paid to has to be exact ada but this causes issues so use geq which has issues.
     checkValuePaidTo :: PubKeyHash -> Integer -> Bool
-    checkValuePaidTo pkh amt = traceIfFalse "What is getting paid is incorrect." $ Value.geq (Contexts.valuePaidTo info pkh) (Ada.lovelaceValueOf amt)
+    checkValuePaidTo pkh amt = traceIfFalse "pay is incorrect." $ Value.geq (Contexts.valuePaidTo info pkh) (Ada.lovelaceValueOf amt)
     
     checkAllPayments :: [PubKeyHash] -> [Integer] -> Bool
     checkAllPayments []     []     = checkValuePaidTo txSigner (cdtProfit datum)
@@ -226,16 +228,19 @@ explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPK
   miner             <- Plutus.Contract.ownPubKeyHash
   let mandoPayout   = Ada.lovelaceValueOf cdtProfit
   logInfo @Prelude.String "find the tx"
+
+  -- This may be the path
   -- let saleDatum     = CustomDatumType { cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit }
   -- let flt _ ciTxOut = P.either P.id Ledger.datumHash (Tx._ciTxOutDatum ciTxOut) P.== Ledger.datumHash (Datum (PlutusTx.toBuiltinData saleDatum))
   -- let tx            = collectFromScriptFilter flt scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
   
+  -- this works
   let txOut = collectFromScript scrOutputs (CustomRedeemerType {}) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
       inst = typedValidator $ ContractParams {}
       lookups = Constraints.typedValidatorLookups inst Prelude.<> Constraints.unspentOutputs scrOutputs
   logInfo @Prelude.String "submit the tx"
   void $ submitTxConstraintsWith lookups txOut
-  -- void $ submitTxConstraints (typedValidator $ ContractParams {}) tx
+  -- void $ submitTxConstraints (typedValidator $ ContractParams {}) tx -- may be needed
   
 -- | sum a list
 sumList :: [Integer] -> Integer
@@ -251,9 +256,6 @@ createTX (x:xs) (y:ys) pkh val = Constraints.mustPayToPubKey x (Ada.lovelaceValu
 -------------------------------------------------------------------------------
 -- | TRACES
 -------------------------------------------------------------------------------
--- testTracing :: IO ()
--- testTracing = Trace.runEmulatorTraceIO smooshTheBallThenExplode
-
 smoosher :: CW.MockWallet
 smoosher = CW.knownWallet 1
 
@@ -273,7 +275,7 @@ payouts c = payouts' c []
     payouts' 0 pkhs = pkhs
     payouts' c' pkhs = payouts' (c' P.- 1) (CW.pubKeyHash (CW.knownWallet c') : pkhs)
 
--- | Convert a base 10 integer into base q as a list of integers.
+-- | Convert a base 10 integer into base q as a list of integers then +2 *1,2 ADA
 baseQ :: Integer -> Integer -> [Integer]
 baseQ number base = P.map (1200000 P.*) $ P.map (2 P.+) $ baseQ' number base []
   where
@@ -284,17 +286,41 @@ numDigits :: Integer -> Integer -> Integer
 numDigits number base = (base Prelude.^ (number P.- 1)) P.+ 20
 
 
-smooshTheBallThenExplode :: IO ()
-smooshTheBallThenExplode = Trace.runEmulatorTraceIO smooshTheBallThenExplode'
+smooshTheBall :: IO ()
+smooshTheBall = Trace.runEmulatorTraceIO smooshTheBall'
   where 
-    smooshTheBallThenExplode' = do
+    smooshTheBall' = do
       hdl1 <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
-      hdl2 <- Trace.activateContractWallet (W.toMockWallet exploder) (contract @ContractError)
-      let users = 10
+      let users = 6
       let groupPKHs = payouts users
       let groupPayouts = baseQ (numDigits users users) users
       let datum = CustomDatumType { cdtRoyaltyPKHs = groupPKHs, cdtPayouts = groupPayouts, cdtProfit = 1234567 }
       Trace.callEndpoint @"smoosh" hdl1 datum
+      void $ Trace.waitNSlots 1
+
+explodeTheBall :: IO ()
+explodeTheBall = Trace.runEmulatorTraceIO explodeTheBall'
+  where 
+    explodeTheBall' = do
+      let users = 10
+      let groupPKHs = payouts users
+      let groupPayouts = baseQ (numDigits users users) users
+      let datum = CustomDatumType { cdtRoyaltyPKHs = groupPKHs, cdtPayouts = groupPayouts, cdtProfit = 1234567 }
+      hdl2 <- Trace.activateContractWallet (W.toMockWallet exploder) (contract @ContractError)
+      Trace.callEndpoint @"explode" hdl2 datum
+      void $ Trace.waitNSlots 1
+
+smooshTheBallThenExplode :: IO ()
+smooshTheBallThenExplode = Trace.runEmulatorTraceIO smooshTheBallThenExplode'
+  where 
+    smooshTheBallThenExplode' = do
+      let users = 10
+      let groupPKHs = payouts users
+      let groupPayouts = baseQ (numDigits users users) users
+      let datum = CustomDatumType { cdtRoyaltyPKHs = groupPKHs, cdtPayouts = groupPayouts, cdtProfit = 1234567 }
+      hdl1 <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
+      Trace.callEndpoint @"smoosh" hdl1 datum
       _ <-  Trace.waitNSlots 1
+      hdl2 <- Trace.activateContractWallet (W.toMockWallet exploder) (contract @ContractError)
       Trace.callEndpoint @"explode" hdl2 datum
       void $ Trace.waitNSlots 1

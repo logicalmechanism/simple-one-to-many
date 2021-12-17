@@ -11,8 +11,13 @@ The goal is giving an incentive to the exploders to find a ball within the ecosy
 
 ```
 cd royalty-payout
+cabal clean
 cabal build -w ghc-8.10.4
 cabal run royalty-payout
+```
+
+This will be integrated soon.
+```
 cabal run plutus-starter-pab
 ```
 
@@ -24,6 +29,8 @@ Trace test can be ran from the repl.
 cabal repl royalty-payment.cabal
 
 smooshTheBallThenExplode
+smooshTheBall
+explodeTheBall
 ```
 
 
