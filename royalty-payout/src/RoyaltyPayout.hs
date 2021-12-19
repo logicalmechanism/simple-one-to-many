@@ -204,32 +204,34 @@ checkDatumInputs pkhs amts prof = do
 
 -- | The buy endpoint.
 smoosh :: AsContractError e => Promise () Schema e ()
-smoosh =  endpoint @"smoosh" @CustomDatumType $ \(CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit}) -> do
-  logInfo @Prelude.String "smoosh the ada ball"
+smoosh =  endpoint @"smoosh" @CustomDatumType $ \CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit} -> do
   miner <- Plutus.Contract.ownPubKeyHash
+  -- log some stuff
+  logInfo @Prelude.String "smoosh the ada ball"
   logInfo @Prelude.String "The Smoosher"
   logInfo @PubKeyHash miner
   logInfo @Prelude.String "The Data"
   logInfo @[PubKeyHash] cdtRoyaltyPKHs
   logInfo @[Integer] cdtPayouts
-  logInfo @Integer cdtProfit
   -- Check the datum inputs
   if checkDatumInputs cdtRoyaltyPKHs cdtPayouts cdtProfit
   then do
-    logInfo @Prelude.String "adding the profit"
-    let totalPlusFee = sumList cdtPayouts P.+ cdtProfit
     logInfo @Prelude.String "submitting the tx"
-    let inst  = typedValidator $ ContractParams {}
-    let datum = CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit}
-    let newValue = Ada.lovelaceValueOf totalPlusFee
-    _ <- submitTxConstraints inst $ Constraints.mustPayToTheScript datum newValue
-    logInfo @Prelude.String "the ball is smooshed"
+    let totalPlusFee = sumList cdtPayouts P.+ cdtProfit
+        inst         = typedValidator $ ContractParams {}
+        datum        = CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit}
+        newValue     = Ada.lovelaceValueOf totalPlusFee
+        constraint   = Constraints.mustPayToTheScript datum newValue
+    ledgerTx <- submitTxConstraints inst constraint
+    _        <- awaitTxConfirmed $ Ledger.getCardanoTxId ledgerTx
+    logInfo @Prelude.String "the ball has been smooshed"
   else
+    -- log and do nothing
     logInfo @Prelude.String "the ball has crumbled due to bad inputs."
 
 -- | The remove endpoint.
 explode :: AsContractError e => Promise () Schema e ()
-explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit}) -> do
+explode =  endpoint @"explode" @CustomDatumType $ \CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit} -> do
   logInfo @Prelude.String "explode the ada ball"
   scrOutputs        <- utxosAt $ Scripts.validatorAddress $ typedValidator $ ContractParams {}
   miner             <- Plutus.Contract.ownPubKeyHash
@@ -245,8 +247,9 @@ explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType {cdtRoyaltyP
       inst = typedValidator $ ContractParams {}
       lookups = Constraints.typedValidatorLookups inst Prelude.<> Constraints.unspentOutputs scrOutputs
   logInfo @Prelude.String "submitting the tx"
-  _ <- submitTxConstraintsWith lookups txOut
-  logInfo @Prelude.String "the ball has exploded"
+  void $ submitTxConstraintsWith lookups txOut
+  -- _ <- submitTxConstraintsWith lookups txOut
+  -- logInfo @Prelude.String "the ball has exploded"
   
 -- | sum a list
 sumList :: [Integer] -> Integer
