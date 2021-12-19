@@ -6,7 +6,7 @@ A ball contains some amount of ADA that will be paid out to many addresses. If t
 
 The goal is giving an incentive to the exploders to find a ball within the ecosystem. If the profit is greater than the fee then a exploder will gain ADA. Making the profit large enough to cover the fee becomes easy with full balls. A ball will max out at the protocol parameters which is about 16 addresses and amounts.
 
-## Setting up
+## Simulating The PAB
 
 Build the project and compile the plutus script.
 ```
@@ -30,7 +30,7 @@ curl -s http://localhost:9080/api/contract/definitions | jq
 
 Read more about the [PAB Scripts](pab_scripts/README.md) and check out the pab_scripts folder for bash scripts for interacting with the pab.
 
-## Using
+## Using The Repl
 
 Trace test can be ran from the repl.
 
