@@ -8,7 +8,7 @@ The goal is giving an incentive to the exploders to find a ball within the ecosy
 
 ## Setting up
 
-
+Build the project and compile the plutus script.
 ```
 cd royalty-payout
 cabal clean
@@ -16,7 +16,7 @@ cabal build -w ghc-8.10.4
 cabal run royalty-payout
 ```
 
-This will be integrated soon.
+Run the local PAB with this command.
 ```
 cabal exec -- plutus-starter-pab
 ```
@@ -28,6 +28,7 @@ Check if the contract definitions are correct.
 curl -s http://localhost:9080/api/contract/definitions | jq
 ```
 
+Read more about the [PAB Scripts](pab_scripts/README.md) and check out the pab_scripts folder for bash scripts for interacting with the pab.
 
 ## Using
 
