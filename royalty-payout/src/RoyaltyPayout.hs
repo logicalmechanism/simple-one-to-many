@@ -25,6 +25,7 @@ module RoyaltyPayout
   , explode
   , Schema
   , contract
+  , CustomDatumType(..)
   ) where
 
 import           Cardano.Api.Shelley       (PlutusScript (..), PlutusScriptV1)
@@ -67,7 +68,7 @@ import           Wallet.Emulator.Wallet    as W
   cardano-cli 1.32.1 - linux-x86_64 - ghc-8.10
   git rev 4f65fb9a27aa7e3a1873ab4211e412af780a3648
 
-  Ada Balls
+  Smoosh some Ada into a Ball so someone else can explode it later.
 -}
 
 -------------------------------------------------------------------------------
@@ -78,7 +79,7 @@ data CustomDatumType = CustomDatumType
     -- ^ List of the public key hashes
     , cdtPayouts        :: ![Integer]
     -- ^ List of the payouts in lovelace.
-    , cdtProfit         :: Integer
+    , cdtProfit         :: !Integer
     -- ^ The creator of the ball can define the profit.
   }
     deriving stock (Prelude.Eq, Show, Generic)
@@ -203,25 +204,34 @@ checkDatumInputs pkhs amts prof = do
 
 -- | The buy endpoint.
 smoosh :: AsContractError e => Promise () Schema e ()
-smoosh =  endpoint @"smoosh" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPKHs cdtPayouts cdtProfit) -> do
-  logInfo @Prelude.String "smoosh the ada ball"
+smoosh =  endpoint @"smoosh" @CustomDatumType $ \CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit} -> do
   miner <- Plutus.Contract.ownPubKeyHash
+  -- log some stuff
+  logInfo @Prelude.String "smoosh the ada ball"
   logInfo @Prelude.String "The Smoosher"
   logInfo @PubKeyHash miner
+  logInfo @Prelude.String "The Data"
+  logInfo @[PubKeyHash] cdtRoyaltyPKHs
+  logInfo @[Integer] cdtPayouts
   -- Check the datum inputs
   if checkDatumInputs cdtRoyaltyPKHs cdtPayouts cdtProfit
   then do
-    logInfo @Prelude.String "adding the profit"
-    let totalPlusFee = sumList cdtPayouts P.+ cdtProfit
     logInfo @Prelude.String "submitting the tx"
-    _ <- submitTxConstraints (typedValidator $ ContractParams {}) $ Constraints.mustPayToTheScript (CustomDatumType cdtRoyaltyPKHs cdtPayouts cdtProfit) (Ada.lovelaceValueOf totalPlusFee)
-    logInfo @Prelude.String "the ball is smooshed"
+    let totalPlusFee = sumList cdtPayouts P.+ cdtProfit
+        inst         = typedValidator $ ContractParams {}
+        datum        = CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit}
+        newValue     = Ada.lovelaceValueOf totalPlusFee
+        constraint   = Constraints.mustPayToTheScript datum newValue
+    ledgerTx <- submitTxConstraints inst constraint
+    _        <- awaitTxConfirmed $ Ledger.getCardanoTxId ledgerTx
+    logInfo @Prelude.String "the ball has been smooshed"
   else
+    -- log and do nothing
     logInfo @Prelude.String "the ball has crumbled due to bad inputs."
 
 -- | The remove endpoint.
 explode :: AsContractError e => Promise () Schema e ()
-explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPKHs cdtPayouts cdtProfit) -> do
+explode =  endpoint @"explode" @CustomDatumType $ \CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit} -> do
   logInfo @Prelude.String "explode the ada ball"
   scrOutputs        <- utxosAt $ Scripts.validatorAddress $ typedValidator $ ContractParams {}
   miner             <- Plutus.Contract.ownPubKeyHash
@@ -232,13 +242,14 @@ explode =  endpoint @"explode" @CustomDatumType $ \(CustomDatumType cdtRoyaltyPK
   logInfo @Prelude.String "Find The TX"
   logInfo @Prelude.String "Unique Payouts"
   logInfo @Integer $ length cdtPayouts
-
+  -- collect from the script and build the constraints.
   let txOut = collectFromScript scrOutputs (CustomRedeemerType { crtData = 0 }) Prelude.<> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
       inst = typedValidator $ ContractParams {}
       lookups = Constraints.typedValidatorLookups inst Prelude.<> Constraints.unspentOutputs scrOutputs
   logInfo @Prelude.String "submitting the tx"
-  _ <- submitTxConstraintsWith lookups txOut
-  logInfo @Prelude.String "the ball has exploded"
+  void $ submitTxConstraintsWith lookups txOut
+  -- _ <- submitTxConstraintsWith lookups txOut
+  -- logInfo @Prelude.String "the ball has exploded"
   
 -- | sum a list
 sumList :: [Integer] -> Integer

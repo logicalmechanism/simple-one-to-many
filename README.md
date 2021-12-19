@@ -18,8 +18,16 @@ cabal run royalty-payout
 
 This will be integrated soon.
 ```
-cabal run plutus-starter-pab
+cabal exec -- plutus-starter-pab
 ```
+
+In a new terminal we can now run some curl commands to interact with the local pab.
+
+Check if the contract definitions are correct.
+```
+curl -s http://localhost:9080/api/contract/definitions | jq
+```
+
 
 ## Using
 

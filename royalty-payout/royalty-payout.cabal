@@ -68,7 +68,7 @@ library
                       , text
                       , containers
                       , freer-extras
-                      , tasty
+                      , aeson
 
   ghc-options: -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas
 
@@ -102,3 +102,4 @@ executable plutus-starter-pab
     freer-extras -any,
     plutus-ledger -any,
     openapi3 -any,
+    

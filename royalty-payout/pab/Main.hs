@@ -28,16 +28,14 @@ import qualified Plutus.PAB.Webserver.Server         as PAB.Server
 
 import           RoyaltyPayout
 
-import           Plutus.Trace.Emulator.Extract       (writeScriptsTo, ScriptsConfig (..), Command (..))
-import           Ledger.Index                        (ValidatorMode(..))
 
 main :: IO ()
 main = void $ Simulator.runSimulationWith handlers $ do
     Simulator.logString @(Builtin StarterContracts) "Starting plutus-starter PAB webserver on port 8080. Press enter to exit."
     shutdown <- PAB.Server.startServerDebug
     -- Example of spinning up a game instance on startup
-    -- void $ Simulator.activateContract (Wallet 1) GameContract
-    -- void $ Simulator.activateContract (Wallet 2) GameContract
+    -- void $ Simulator.activateContract (Wallet 1) RoyaltyPayout
+    -- void $ Simulator.activateContract (Wallet 2) RoyaltyPayout
     -- You can add simulator actions here:
     -- Simulator.observableState
     -- etc.
@@ -52,19 +50,13 @@ main = void $ Simulator.runSimulationWith handlers $ do
 
     shutdown
 
--- | An example of computing the script size for a particular trace.
--- Read more: <https://plutus.readthedocs.io/en/latest/plutus/howtos/analysing-scripts.html>
 writeCostingScripts :: IO ()
 writeCostingScripts = do
-  let config = ScriptsConfig { scPath = "/tmp/plutus-costing-outputs/", scCommand = cmd }
-      cmd    = Scripts { unappliedValidators = FullyAppliedValidators }
-      -- Note: Here you can use any trace you wish.
-  putStrLn $ "Total size = "
-  putStrLn $ "ExBudget = " 
+  putStrLn "Here" 
 
 
 data StarterContracts =
-    GameContract
+    RoyaltyPayout
     deriving (Eq, Ord, Show, Generic)
     deriving anyclass OpenApi.ToSchema
 
@@ -86,11 +78,11 @@ instance Pretty StarterContracts where
     pretty = viaShow
 
 instance Builtin.HasDefinitions StarterContracts where
-    getDefinitions = [GameContract]
+    getDefinitions = [RoyaltyPayout]
     getSchema =  \case
-        GameContract -> Builtin.endpointsToSchemas @RoyaltyPayout.Schema
+        RoyaltyPayout -> Builtin.endpointsToSchemas @RoyaltyPayout.Schema
     getContract = \case
-        GameContract -> SomeBuiltin (RoyaltyPayout.contract @ContractError)
+        RoyaltyPayout -> SomeBuiltin (RoyaltyPayout.contract @ContractError)
 
 handlers :: SimulatorEffectHandlers (Builtin StarterContracts)
 handlers =
