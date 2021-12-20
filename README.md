@@ -6,6 +6,30 @@ A ball contains some amount of ADA that will be paid out to many addresses. If t
 
 The goal is giving an incentive to the exploders to find a ball within the ecosystem. If the profit is greater than the fee then a exploder will gain ADA. Making the profit large enough to cover the fee becomes easy with full balls. A ball will max out at the protocol parameters which is about 16 addresses and amounts.
 
+## Testnode PAB
+
+```bash
+cd plutus-apps
+git checkout v2021-12-06
+cd plutus-pab
+cabal build plutus-pab-local-cluster cardano-node cardano-wallet
+export SHELLEY_TEST_DATA=/home/cardano/cardano-wallet/lib/shelley/test/data/cardano-node-shelley
+cabal exec plutus-pab-local-cluster
+```
+Wait until the message Starting PAB backend server on port 9080 appears.
+
+Run the integration test:
+
+```
+curl -H "Content-Type: application/json" -v \
+       -X POST \
+       -d '{"caID":{"tag":"IntegrationTest"},"caWallet":{"getWalletId":"2d4cc31a4b3116ab86bfe529d30d9c362acd0b44"}}' \
+       localhost:9080/api/contract/activate
+```
+
+A couple of log messages appear, the last one should say something like "Tx confirmed. Integration test complete."
+
+
 ## Simulating The PAB
 
 Build the project and compile the plutus script.
