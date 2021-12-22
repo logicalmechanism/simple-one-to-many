@@ -68,7 +68,10 @@ import           Wallet.Emulator.Wallet    as W
   cardano-cli 1.32.1 - linux-x86_64 - ghc-8.10
   git rev 4f65fb9a27aa7e3a1873ab4211e412af780a3648
 
-  Smoosh some Ada into a Ball so someone else can explode it later.
+  Smoosh some Ada into a Ball so someone else can explode it later. A lightweight
+  smart contract solution for pure ADA group payouts. The protocol parameters
+  safely allow for a maximum of 10 users per group. If a group has more than the
+  maximum allowed users then the group payment will be split into subgroups.
 -}
 
 -------------------------------------------------------------------------------
