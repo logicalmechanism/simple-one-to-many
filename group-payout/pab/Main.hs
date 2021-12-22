@@ -26,7 +26,7 @@ import           Plutus.PAB.Simulator                (SimulatorEffectHandlers)
 import qualified Plutus.PAB.Simulator                as Simulator
 import qualified Plutus.PAB.Webserver.Server         as PAB.Server
 
-import           RoyaltyPayout
+import           GroupPayout
 
 
 main :: IO ()
@@ -34,8 +34,8 @@ main = void $ Simulator.runSimulationWith handlers $ do
     Simulator.logString @(Builtin StarterContracts) "Starting plutus-starter PAB webserver on port 8080. Press enter to exit."
     shutdown <- PAB.Server.startServerDebug
     -- Example of spinning up a game instance on startup
-    -- void $ Simulator.activateContract (Wallet 1) RoyaltyPayout
-    -- void $ Simulator.activateContract (Wallet 2) RoyaltyPayout
+    -- void $ Simulator.activateContract (Wallet 1) GroupPayout
+    -- void $ Simulator.activateContract (Wallet 2) GroupPayout
     -- You can add simulator actions here:
     -- Simulator.observableState
     -- etc.
@@ -56,7 +56,7 @@ writeCostingScripts = do
 
 
 data StarterContracts =
-    RoyaltyPayout
+    GroupPayout
     deriving (Eq, Ord, Show, Generic)
     deriving anyclass OpenApi.ToSchema
 
@@ -78,11 +78,11 @@ instance Pretty StarterContracts where
     pretty = viaShow
 
 instance Builtin.HasDefinitions StarterContracts where
-    getDefinitions = [RoyaltyPayout]
+    getDefinitions = [GroupPayout]
     getSchema =  \case
-        RoyaltyPayout -> Builtin.endpointsToSchemas @RoyaltyPayout.Schema
+        GroupPayout -> Builtin.endpointsToSchemas @GroupPayout.Schema
     getContract = \case
-        RoyaltyPayout -> SomeBuiltin (RoyaltyPayout.contract @ContractError)
+        GroupPayout -> SomeBuiltin (GroupPayout.contract @ContractError)
 
 handlers :: SimulatorEffectHandlers (Builtin StarterContracts)
 handlers =

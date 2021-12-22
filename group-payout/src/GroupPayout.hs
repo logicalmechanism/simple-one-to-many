@@ -25,9 +25,9 @@
 {-# OPTIONS_GHC -fno-specialise               #-}
 {-# OPTIONS_GHC -fexpose-all-unfoldings       #-}
 
-module RoyaltyPayout
-  ( royaltyPayoutScript
-  , royaltyPayoutScriptShortBs
+module GroupPayout
+  ( groupPayoutScript
+  , groupPayoutScriptShortBs
   , smooshTheBall
   , smooshFail
   , explodeTheBall
@@ -57,14 +57,12 @@ import           Wallet.Emulator.Wallet    as W
 
 import qualified PlutusTx
 import           PlutusTx.Prelude
--- import           PlutusTx.List             as List
 import           PlutusTx.Builtins         as Bi
 
 import           Plutus.Contract
 import qualified Plutus.Trace.Emulator     as Trace
 import qualified Plutus.V1.Ledger.Ada      as Ada
 import qualified Plutus.V1.Ledger.Scripts  as Plutus
-import qualified Plutus.V1.Ledger.Contexts as Contexts
 import qualified Plutus.V1.Ledger.Value    as Value
 
 {- |
@@ -119,16 +117,17 @@ PlutusTx.makeLift ''CustomRedeemerType
 mkValidator :: ContractParams -> CustomDatumType -> CustomRedeemerType -> ScriptContext -> Bool
 mkValidator _ datum _ context = oneScriptInput && checkAllPayments (cdtRoyaltyPKHs datum) (cdtPayouts datum)
   where
+    -- Get the Tx Info
     info :: TxInfo
-    info = Contexts.scriptContextTxInfo context
+    info = scriptContextTxInfo context
 
-    -- First signer is the single signer always.
+    -- First signer is assumed to be the single signer, always.
     txSigner :: PubKeyHash
     txSigner = head $ txInfoSignatories info
 
     -- Value paid to has to be exact ada but this causes issues with validation so we use Value.geq which also its own issues.
     checkValuePaidTo :: PubKeyHash -> Integer -> Bool
-    checkValuePaidTo pkh amt = Value.geq (Contexts.valuePaidTo info pkh) (Ada.lovelaceValueOf amt)
+    checkValuePaidTo pkh amt = Value.geq (valuePaidTo info pkh) (Ada.lovelaceValueOf amt)
     
     -- Loop the pkh and amount lists, checking each case.
     checkAllPayments :: [PubKeyHash] -> [Integer] -> Bool
@@ -180,11 +179,11 @@ validator = Scripts.validatorScript (typedValidator $ ContractParams {})
 script :: Plutus.Script
 script = Plutus.unValidatorScript validator
 
-royaltyPayoutScriptShortBs :: SBS.ShortByteString
-royaltyPayoutScriptShortBs = SBS.toShort . LBS.toStrict $ serialise script
+groupPayoutScriptShortBs :: SBS.ShortByteString
+groupPayoutScriptShortBs = SBS.toShort . LBS.toStrict $ serialise script
 
-royaltyPayoutScript :: PlutusScript PlutusScriptV1
-royaltyPayoutScript = PlutusScriptSerialised royaltyPayoutScriptShortBs
+groupPayoutScript :: PlutusScript PlutusScriptV1
+groupPayoutScript = PlutusScriptSerialised groupPayoutScriptShortBs
 
 -------------------------------------------------------------------------------
 -- | Off Chain
@@ -259,16 +258,10 @@ explode =  endpoint @"explode" @CustomDatumType $ \CustomDatumType {cdtRoyaltyPK
   logInfo @String "Unique Payouts"
   logInfo @Integer $ length cdtPayouts
   -- collect from the script and build the constraints.
-  -- let txOut = collectFromScript scrOutputs (CustomRedeemerType { crtData = 0 }) <> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
-  --     inst = typedValidator $ ContractParams {}
-  --     lookups = Constraints.typedValidatorLookups inst <> Constraints.unspentOutputs scrOutputs
-  -- logInfo @String "submitting the tx"
-  -- void $ submitTxConstraintsWith lookups txOut
   let inst = typedValidator $ ContractParams {}
-  let tx  = collectFromScript scrOutputs CustomRedeemerType { crtData = 0 } <> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
-  void $ submitTxConstraintsSpending inst scrOutputs tx
-  -- _ <- submitTxConstraintsWith lookups txOut
-  -- logInfo @String "the ball has exploded"
+  let tx   = collectFromScript scrOutputs CustomRedeemerType { crtData = 0 } <> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
+  _ <- submitTxConstraintsSpending inst scrOutputs tx
+  logInfo @String "the ball has exploded"
   
 -- | sum a list
 sumList :: [Integer] -> Integer

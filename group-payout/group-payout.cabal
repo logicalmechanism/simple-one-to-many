@@ -1,6 +1,6 @@
 cabal-version: 2.4
 
-name:                   royalty-payout
+name:                   group-payout
 version:                1.0
 description:            A plutus script for retreiving funds.
 author:                 The Ancient Kraken
@@ -54,7 +54,7 @@ library
 
   hs-source-dirs:       src
 
-  exposed-modules:      RoyaltyPayout
+  exposed-modules:      GroupPayout
 
   build-depends:        bytestring
                       , cardano-api
@@ -72,15 +72,15 @@ library
 
   ghc-options: -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas
 
-executable royalty-payout
+executable group-payout
   import:               base, project-config
   hs-source-dirs:       app
-  main-is:              royalty-payout.hs
+  main-is:              group-payout.hs
   ghc-options:          -threaded -rtsopts "-with-rtsopts=-T"
 
   build-depends:        cardano-api
                       , cardano-ledger-alonzo
-                      , royalty-payout
+                      , group-payout
                       , plutus-ledger-api
                       , bytestring
 
@@ -95,7 +95,7 @@ executable plutus-starter-pab
     data-default -any,
     plutus-contract -any,
     plutus-pab -any,
-    royalty-payout -any,
+    group-payout -any,
     aeson -any,
     freer-simple -any,
     prettyprinter -any,
