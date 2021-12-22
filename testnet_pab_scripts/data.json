@@ -1,0 +1,9 @@
+{
+    "caID": {
+        "contents": {"getTxId": "a153d643263efac5e87e400e3d8b4671c4ba83114115671f4a829d30ae975060"},
+        "tag": "WaitForTx"
+    },
+    "caWallet": {
+        "getWalletId": "826dd4a79e871c2959c4c9d56b88877aa87920da"
+    }
+}

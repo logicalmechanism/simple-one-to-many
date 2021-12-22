@@ -1,0 +1,105 @@
+cabal-version: 2.4
+
+name:                   group-payout
+version:                1.0
+description:            A plutus script for retreiving funds.
+author:                 The Ancient Kraken
+maintainer:             logical.mechanism@protonmail.com
+license:                AGPL-3.0-only
+build-type:             Simple
+
+Flag unexpected_thunks
+  Description:   Turn on unexpected thunks checks
+  Default:       False
+
+common base
+  build-depends: base >= 4.14 && < 4.15
+
+common project-config
+  default-language:     Haskell2010
+
+  default-extensions:   NoImplicitPrelude
+                        OverloadedStrings
+
+  ghc-options:          -Wall
+                        -Wcompat
+                        -Wincomplete-record-updates
+                        -Wpartial-fields
+                        -Wredundant-constraints
+                        -Wincomplete-uni-patterns
+                        -Wmissing-export-lists
+                        -Wpartial-fields
+                        -Wmissing-deriving-strategies
+                        -Wunused-packages
+
+common lang
+    default-language:   Haskell2010
+    ghc-options:
+      -Wall -Wnoncanonical-monad-instances
+      -Wincomplete-uni-patterns -Wincomplete-record-updates
+      -Wredundant-constraints -Widentities -rtsopts
+      -- See Plutus Tx readme
+      -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas
+
+common maybe-Win32
+  if os(windows)
+     build-depends:    Win32
+
+library
+  import:               base, project-config
+                      , maybe-Win32
+
+  if flag(unexpected_thunks)
+    cpp-options: -DUNEXPECTED_THUNKS
+
+  hs-source-dirs:       src
+
+  exposed-modules:      GroupPayout
+
+  build-depends:        bytestring
+                      , cardano-api
+                      , plutus-ledger
+                      , plutus-ledger-api
+                      , plutus-tx
+                      , plutus-tx-plugin
+                      , playground-common
+                      , plutus-contract
+                      , serialise
+                      , text
+                      , containers
+                      , freer-extras
+                      , aeson
+
+  ghc-options: -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas
+
+executable group-payout
+  import:               base, project-config
+  hs-source-dirs:       app
+  main-is:              group-payout.hs
+  ghc-options:          -threaded -rtsopts "-with-rtsopts=-T"
+
+  build-depends:        cardano-api
+                      , cardano-ledger-alonzo
+                      , group-payout
+                      , plutus-ledger-api
+                      , bytestring
+
+executable plutus-starter-pab
+  import: lang
+  main-is: Main.hs
+  hs-source-dirs: pab
+  ghc-options:
+    -threaded
+  build-depends:
+    base >= 4.9 && < 5,
+    data-default -any,
+    plutus-contract -any,
+    plutus-pab -any,
+    group-payout -any,
+    aeson -any,
+    freer-simple -any,
+    prettyprinter -any,
+    freer-extras -any,
+    plutus-ledger -any,
+    openapi3 -any,
+    
