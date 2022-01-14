@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DeriveAnyClass        #-}
 {-# LANGUAGE DeriveGeneric         #-}
@@ -29,8 +30,9 @@ module GroupPayout
   ( groupPayoutScript
   , groupPayoutScriptShortBs
   , smooshTheBall
-  , smooshFail
+  , smooshWithNoProfit
   , explodeTheBall
+  , explodeWithNoProfit
   , smoosh
   , explode
   , Schema
@@ -58,7 +60,6 @@ import           Wallet.Emulator.Wallet    as W
 import qualified PlutusTx
 import           PlutusTx.Prelude
 import           PlutusTx.Builtins         as Bi
-
 import           Plutus.Contract
 import qualified Plutus.Trace.Emulator     as Trace
 import qualified Plutus.V1.Ledger.Ada      as Ada
@@ -70,12 +71,12 @@ import qualified Plutus.V1.Ledger.Value    as Value
   Copyright: 2021
   Version  : Rev 0
 
-  cardano-cli 1.32.1 - linux-x86_64 - ghc-8.10
-  git rev 4f65fb9a27aa7e3a1873ab4211e412af780a3648
+  cardano-cli 1.33.0 - linux-x86_64 - ghc-8.10
+  git rev 814df2c146f5d56f8c35a681fe75e85b905aed5d
 
-  Smoosh some Ada into a Ball so someone else can explode it later. A lightweight
+  Smoosh some Ada into a ball so someone else can explode it later. A lightweight
   smart contract solution for pure ADA group payouts. The protocol parameters
-  safely allow for a maximum of 10 users per group. If a group has more than the
+  safely allow for a maximum of ~10 users per group. If a group has more than the
   maximum allowed users then the group payment will be split into subgroups.
 -}
 
@@ -83,12 +84,10 @@ import qualified Plutus.V1.Ledger.Value    as Value
 -- | Create the datum parameters data object.
 -------------------------------------------------------------------------------
 data CustomDatumType = CustomDatumType
-    { cdtRoyaltyPKHs    :: ![PubKeyHash]
+    { cdtGroupPKHs :: ![PubKeyHash]
     -- ^ List of the public key hashes
-    , cdtPayouts        :: ![Integer]
+    , cdtPayouts   :: ![Integer]
     -- ^ List of the payouts in lovelace.
-    , cdtProfit         :: !Integer
-    -- ^ The creator of the ball can define the profit.
   }
     deriving stock (Show, Generic)
     deriving anyclass (FromJSON, ToJSON, ToSchema)
@@ -104,7 +103,7 @@ PlutusTx.makeLift ''ContractParams
 -- | Create the redeemer parameters data object.
 -------------------------------------------------------------------------------
 newtype CustomRedeemerType = CustomRedeemerType
-  { crtData :: Integer }
+  { crtData :: Integer } -- Dummy Integer
     deriving stock (Show, Generic)
     deriving anyclass (FromJSON, ToJSON, ToSchema)
 PlutusTx.unstableMakeIsData ''CustomRedeemerType
@@ -115,38 +114,40 @@ PlutusTx.makeLift ''CustomRedeemerType
 -------------------------------------------------------------------------------
 {-# INLINABLE mkValidator #-}
 mkValidator :: ContractParams -> CustomDatumType -> CustomRedeemerType -> ScriptContext -> Bool
-mkValidator _ datum _ context = oneScriptInput && checkAllPayments (cdtRoyaltyPKHs datum) (cdtPayouts datum)
+mkValidator _ datum _ context = oneScriptInput && checkAllPayments (cdtGroupPKHs datum) (cdtPayouts datum)
   where
     -- Get the Tx Info
     info :: TxInfo
     info = scriptContextTxInfo context
 
-    -- First signer is assumed to be the single signer, always.
-    txSigner :: PubKeyHash
-    txSigner = head $ txInfoSignatories info
-
     -- Value paid to has to be exact ada but this causes issues with validation so we use Value.geq which also its own issues.
     checkValuePaidTo :: PubKeyHash -> Integer -> Bool
     checkValuePaidTo pkh amt = Value.geq (valuePaidTo info pkh) (Ada.lovelaceValueOf amt)
-    
+
     -- Loop the pkh and amount lists, checking each case.
     checkAllPayments :: [PubKeyHash] -> [Integer] -> Bool
-    checkAllPayments []     []     = checkValuePaidTo txSigner (cdtProfit datum)
-    checkAllPayments []     _      = checkValuePaidTo txSigner (cdtProfit datum)
-    checkAllPayments _      []     = checkValuePaidTo txSigner (cdtProfit datum)
+    checkAllPayments []     []     = True
+    checkAllPayments []     _      = True
+    checkAllPayments _      []     = True
     checkAllPayments (x:xs) (y:ys)
-      | checkValuePaidTo x y       = checkAllPayments xs ys
-      | otherwise                  = False
+      | checkValuePaidTo x y = checkAllPayments xs ys
+      | otherwise            = traceIfFalse "A Member Of The Group Is Not Being Paid." $ False
 
     -- Force a single utxo has a datum hash in the inputs by checking the length of the inputs that have a datum hash.
     oneScriptInput :: Bool
-    oneScriptInput = loopInputs (txInfoInputs info) 0
+    oneScriptInput = traceIfFalse "More Than One Script Input Is Being Validated." $ loopInputs (txInfoInputs info) 0
       where
         loopInputs :: [TxInInfo] -> Integer -> Bool
-        loopInputs [] counter = counter == 1
-        loopInputs (x:xs) counter = case txOutDatumHash $ txInInfoResolved x of
-            Nothing -> loopInputs xs counter
-            Just _  -> loopInputs xs (counter + 1)
+        loopInputs []     !counter = counter == 1
+        loopInputs (x:xs) !counter = case txOutDatumHash $ txInInfoResolved x of
+            Nothing -> do
+              if counter > 1
+                then loopInputs [] counter
+                else loopInputs xs counter
+            Just _  -> do
+              if counter > 1
+                then loopInputs [] counter
+                else loopInputs xs (counter + 1)
 
         
 -------------------------------------------------------------------------------
@@ -188,7 +189,15 @@ groupPayoutScript = PlutusScriptSerialised groupPayoutScriptShortBs
 -------------------------------------------------------------------------------
 -- | Off Chain
 -------------------------------------------------------------------------------
+{- | This off chain is for the pab and for testing on the mock chain and the repl.
+The endpoints are a work in progress. For live testnet testing use the cli.
 
+There are only two things that happen in this contract. Someone is smooshing an ada
+ball together for an ada explosion or someone is exploding a smooshed ada ball. A
+nice feature of this offchain solution is prohibiting incorrect smoosh datum values.
+
+The minimum required ada @see minimumAmt needs to be set to the real value in production.
+-}
 -- | The schema of the contract, with two endpoints.
 type Schema =
   Endpoint "smoosh"  CustomDatumType .\/ 
@@ -207,34 +216,33 @@ checkMinPayout (x:xs)
   | otherwise        = checkMinPayout xs 
 
 -- | Put all the buy functions together here
-checkDatumInputs :: [PubKeyHash] -> [Integer] -> Integer -> Bool
-checkDatumInputs pkhs amts prof = do
-  { let a = traceIfFalse "Found Duplicates."     $ length (nub pkhs) == length pkhs    -- no duplicates
-  ; let b = traceIfFalse "Lengths Not Equal"     $ length pkhs == length amts               -- equal pkhs + vals
-  ; let c = traceIfFalse "A Payout Is Too Small" $ checkMinPayout amts                            -- min utxo required
+checkDatumInputs :: [PubKeyHash] -> [Integer] -> Bool
+checkDatumInputs pkhs amts = do
+  { let a = traceIfFalse "Found Duplicates."     $ length (nub pkhs) == length pkhs     -- no duplicates
+  ; let b = traceIfFalse "Lengths Not Equal"     $ length pkhs == length amts           -- equal pkhs + vals
+  ; let c = traceIfFalse "A Payout Is Too Small" $ checkMinPayout amts                  -- min utxo required
   ; let d = traceIfFalse "Empty Data"            $ length pkhs /= 0 && length amts /= 0 -- no empty entries
-  ; let e = traceIfFalse "Profit Is Too Small."  $ prof >= minimumAmt                           -- min utxo
-  ; all (==(True :: Bool)) [a,b,c,d,e]
+  ; all (==(True :: Bool)) [a,b,c,d]
   }
 
 -- | The buy endpoint.
 smoosh :: AsContractError e => Promise () Schema e ()
-smoosh =  endpoint @"smoosh" @CustomDatumType $ \CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit} -> do
+smoosh =  endpoint @"smoosh" @CustomDatumType $ \CustomDatumType {cdtGroupPKHs=cdtGroupPKHs, cdtPayouts=cdtPayouts} -> do
   miner <- Plutus.Contract.ownPubKeyHash
   -- log some stuff
   logInfo @String "smoosh the ada ball"
   logInfo @String "The Smoosher"
   logInfo @PubKeyHash miner
   logInfo @String "The Data"
-  logInfo @[PubKeyHash] cdtRoyaltyPKHs
+  logInfo @[PubKeyHash] cdtGroupPKHs
   logInfo @[Integer] cdtPayouts
   -- Check the datum inputs
-  if checkDatumInputs cdtRoyaltyPKHs cdtPayouts cdtProfit
+  if checkDatumInputs cdtGroupPKHs cdtPayouts
   then do
     logInfo @String "submitting the tx"
-    let totalPlusFee = sumList cdtPayouts + cdtProfit
+    let totalPlusFee = sumList cdtPayouts
         inst         = typedValidator $ ContractParams {}
-        datum        = CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit}
+        datum        = CustomDatumType {cdtGroupPKHs=cdtGroupPKHs, cdtPayouts=cdtPayouts}
         newValue     = Ada.lovelaceValueOf totalPlusFee
         constraint   = Constraints.mustPayToTheScript datum newValue
     ledgerTx <- submitTxConstraints inst constraint
@@ -246,20 +254,18 @@ smoosh =  endpoint @"smoosh" @CustomDatumType $ \CustomDatumType {cdtRoyaltyPKHs
 
 -- | The remove endpoint.
 explode :: AsContractError e => Promise () Schema e ()
-explode =  endpoint @"explode" @CustomDatumType $ \CustomDatumType {cdtRoyaltyPKHs=cdtRoyaltyPKHs, cdtPayouts=cdtPayouts, cdtProfit=cdtProfit} -> do
+explode =  endpoint @"explode" @CustomDatumType $ \CustomDatumType {cdtGroupPKHs=cdtGroupPKHs, cdtPayouts=cdtPayouts} -> do
   logInfo @String "explode the ada ball"
   scrOutputs        <- utxosAt $ Scripts.validatorAddress $ typedValidator $ ContractParams {}
   miner             <- Plutus.Contract.ownPubKeyHash
-  let mandoPayout   = Ada.lovelaceValueOf cdtProfit
   logInfo @String "The Miner"
   logInfo @PubKeyHash miner
-  logInfo @Value mandoPayout
   logInfo @String "Find The TX"
   logInfo @String "Unique Payouts"
   logInfo @Integer $ length cdtPayouts
   -- collect from the script and build the constraints.
   let inst = typedValidator $ ContractParams {}
-  let tx   = collectFromScript scrOutputs CustomRedeemerType { crtData = 0 } <> createTX cdtRoyaltyPKHs cdtPayouts miner mandoPayout
+  let tx   = collectFromScript scrOutputs CustomRedeemerType { crtData = 0 } <> createTX cdtGroupPKHs cdtPayouts miner
   _ <- submitTxConstraintsSpending inst scrOutputs tx
   logInfo @String "the ball has exploded"
   
@@ -268,11 +274,11 @@ sumList :: [Integer] -> Integer
 sumList = foldr (+) 0
 
 -- create must pay to pubkeys
-createTX :: [PubKeyHash] -> [Integer] -> PubKeyHash -> Value -> Constraints.TxConstraints i o
-createTX []     []     pkh val = Constraints.mustPayToPubKey pkh val
-createTX []     _      pkh val = Constraints.mustPayToPubKey pkh val
-createTX _      []     pkh val = Constraints.mustPayToPubKey pkh val
-createTX (x:xs) (y:ys) pkh val = Constraints.mustPayToPubKey x (Ada.lovelaceValueOf y) <> createTX xs ys pkh val
+createTX :: [PubKeyHash] -> [Integer] -> PubKeyHash -> Constraints.TxConstraints i o
+createTX []     []     pkh = Constraints.mustBeSignedBy pkh
+createTX []     _      pkh = Constraints.mustBeSignedBy pkh
+createTX _      []     pkh = Constraints.mustBeSignedBy pkh
+createTX (x:xs) (y:ys) pkh = Constraints.mustPayToPubKey x (Ada.lovelaceValueOf y) <> createTX xs ys pkh
 
 
 -------------------------------------------------------------------------------
@@ -284,7 +290,7 @@ smooshing can fail because the datum is checked to ensure validity. The exploder
 will explode the ball, resulting in payments for everyone including themselves.
 Each ball has a profit attached to it to incentivize exploding smooshed ada balls.
 
-@See smooshTheBall, smooshFail, explodeTheBall
+@See smooshTheBall, smooshWithNoProfit, explodeTheBall, explodeWithNoProfit
 -}
 smoosher :: CW.MockWallet
 smoosher = CW.knownWallet 1
@@ -336,7 +342,16 @@ smooshTheBall = Trace.runEmulatorTraceIO smooshTheBall'
   where 
     smooshTheBall' = do
       hdl1 <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
-      let datum = CustomDatumType { cdtRoyaltyPKHs = listOfPKHs, cdtPayouts = listOfPayouts, cdtProfit = 1234567 }
+      let datum = CustomDatumType { cdtGroupPKHs = listOfPKHs, cdtPayouts = listOfPayouts}
+      Trace.callEndpoint @"smoosh" hdl1 datum
+      void $ Trace.waitNSlots 1
+
+smooshWithNoProfit :: IO ()
+smooshWithNoProfit = Trace.runEmulatorTraceIO smooshWithNoProfit'
+  where 
+    smooshWithNoProfit' = do
+      hdl1 <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
+      let datum = CustomDatumType { cdtGroupPKHs = listOfPKHs, cdtPayouts = listOfPayouts } -- no profit
       Trace.callEndpoint @"smoosh" hdl1 datum
       void $ Trace.waitNSlots 1
 
@@ -344,16 +359,18 @@ explodeTheBall :: IO ()
 explodeTheBall = Trace.runEmulatorTraceIO explodeTheBall'
   where 
     explodeTheBall' = do
-      let datum = CustomDatumType { cdtRoyaltyPKHs = listOfPKHs, cdtPayouts = listOfPayouts, cdtProfit = 1234567 }
+      let datum = CustomDatumType { cdtGroupPKHs = listOfPKHs, cdtPayouts = listOfPayouts}
       hdl2 <- Trace.activateContractWallet (W.toMockWallet exploder) (contract @ContractError)
       Trace.callEndpoint @"explode" hdl2 datum
       void $ Trace.waitNSlots 1
 
-smooshFail :: IO ()
-smooshFail = Trace.runEmulatorTraceIO smooshFail'
+explodeWithNoProfit :: IO ()
+explodeWithNoProfit = Trace.runEmulatorTraceIO explodeWithNoProfit'
   where 
-    smooshFail' = do
-      hdl1 <- Trace.activateContractWallet (W.toMockWallet smoosher) (contract @ContractError)
-      let datum = CustomDatumType { cdtRoyaltyPKHs = listOfPKHs, cdtPayouts = listOfPayouts, cdtProfit = 0 } -- no profit
-      Trace.callEndpoint @"smoosh" hdl1 datum
+    explodeWithNoProfit' = do
+      let datum = CustomDatumType { cdtGroupPKHs = listOfPKHs, cdtPayouts = listOfPayouts } -- no profit
+      hdl2 <- Trace.activateContractWallet (W.toMockWallet exploder) (contract @ContractError)
+      Trace.callEndpoint @"explode" hdl2 datum
       void $ Trace.waitNSlots 1
+
+

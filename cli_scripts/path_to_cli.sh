@@ -1,1 +1,1 @@
-../../cardano-node/cardano-cli-testnet/bin/cardano-cli
+/home/cardano/Documents/Work/tokhun_contracts/cardano-node/cardano-cli-testnet/bin/cardano-cli
