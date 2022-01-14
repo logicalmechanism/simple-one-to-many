@@ -3,16 +3,16 @@ set -e
 
 CARDANO_NODE_SOCKET_PATH=$(cat path_to_socket.sh)
 cli=$(cat path_to_cli.sh)
-script_path="data/royalty_payout.plutus"
+script_path="data/group_payout.plutus"
 
 script_address=$(${cli} address build --payment-script-file ${script_path} --testnet-magic 1097911063)
 buyer_address=$(cat buyer-wallet/payment.addr)
 
 # The Outbound Address Payments
-royal_A_address_out="addr_test1vz3ppzmmzuz0nlsjeyrqjm4pvdxl3cyfe8x06eg6htj2gwgv02qjt + 3500000"
-royal_B_address_out="addr_test1vrxm0qpeek38dflguvrpp87hhewthd0mda44tnd45rjxqdg0vlz8d + 2100000"
-royal_C_address_out="addr_test1vq54qjd9xmzls0m6zwkq0ne4tm4nmp0cfdrnsyqk835sn0g9ygn3u + 1500000"
-royal_D_address_out="addr_test1vzhcf6lqjqmjwk5rv0kk996qrd7f7d429t5zrfkts9f8a3gslaayv + 1700000"
+A_address_out="addr_test1vz3ppzmmzuz0nlsjeyrqjm4pvdxl3cyfe8x06eg6htj2gwgv02qjt + 3500000"
+B_address_out="addr_test1vrxm0qpeek38dflguvrpp87hhewthd0mda44tnd45rjxqdg0vlz8d + 2100000"
+C_address_out="addr_test1vq54qjd9xmzls0m6zwkq0ne4tm4nmp0cfdrnsyqk835sn0g9ygn3u + 1500000"
+D_address_out="addr_test1vzhcf6lqjqmjwk5rv0kk996qrd7f7d429t5zrfkts9f8a3gslaayv + 1700000"
 
 echo -e "\033[0;36m Getting Buyer UTxO Information \033[0m"
 ${cli} query utxo \
@@ -58,26 +58,30 @@ FEE=$(${cli} transaction build \
     --tx-in ${script_tx_in}  \
     --tx-in-datum-file data/datum.json \
     --tx-in-redeemer-file data/redeemer.json \
-    --tx-out="${royal_A_address_out}" \
-    --tx-out="${royal_B_address_out}" \
-    --tx-out="${royal_C_address_out}" \
-    --tx-out="${royal_D_address_out}" \
+    --tx-out="${A_address_out}" \
+    --tx-out="${B_address_out}" \
+    --tx-out="${C_address_out}" \
+    --tx-out="${D_address_out}" \
     --tx-in-script-file ${script_path} \
     --testnet-magic 1097911063)
 
+    # --tx-out="${profit_out}" \
 IFS=':' read -ra VALUE <<< "$FEE"
 IFS=' ' read -ra FEE <<< "${VALUE[1]}"
 FEE=${FEE[1]}
 echo -e "\033[1;32m Fee \033[0m" ${FEE}
-
+#
+# exit
+#
 echo -e "\033[0;36m Signing Tx \033[0m"
 ${cli} transaction sign \
     --signing-key-file buyer-wallet/payment.skey \
     --tx-body-file tmp/tx.draft \
     --out-file tmp/tx.signed \
     --testnet-magic 1097911063
-
-
+#
+# exit
+#
 echo -e "\033[0;36m Submitting Tx \033[0m"
 ${cli} transaction submit \
     --testnet-magic 1097911063 \

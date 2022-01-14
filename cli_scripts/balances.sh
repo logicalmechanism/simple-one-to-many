@@ -3,7 +3,7 @@ set -e
 
 CARDANO_NODE_SOCKET_PATH=$(cat path_to_socket.sh)
 cli=$(cat path_to_cli.sh)
-script_path="data/royalty_payout.plutus"
+script_path="data/group_payout.plutus"
 
 SCRIPT_ADDRESS=$(${cli} address build --payment-script-file ${script_path} --testnet-magic 1097911063)
 BUYER_ADDRESS=$(cat buyer-wallet/payment.addr)
