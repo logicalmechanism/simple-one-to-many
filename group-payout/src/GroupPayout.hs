@@ -64,7 +64,7 @@ import           Plutus.Contract
 import qualified Plutus.Trace.Emulator     as Trace
 import qualified Plutus.V1.Ledger.Ada      as Ada
 import qualified Plutus.V1.Ledger.Scripts  as Plutus
-import qualified Plutus.V1.Ledger.Value    as Value
+-- import qualified Plutus.V1.Ledger.Value    as Value
 
 {- |
   Author   : The Ancient Kraken
@@ -120,18 +120,31 @@ mkValidator _ datum _ context = oneScriptInput && checkAllPayments (cdtGroupPKHs
     info :: TxInfo
     info = scriptContextTxInfo context
 
+    -- force a tx out with some value going to a pkh address.
+    checkTxOutForValueAtPKH :: [TxOut] -> PubKeyHash -> Value -> Bool
+    checkTxOutForValueAtPKH [] _pkh _val = traceIfFalse "No Tx Out Found." False
+    checkTxOutForValueAtPKH (txOut:txOuts) pkh val
+      | checkAddr && checkVal = True
+      | otherwise             = checkTxOutForValueAtPKH txOuts pkh val
+      where
+        checkAddr :: Bool
+        checkAddr = txOutAddress txOut == pubKeyHashAddress pkh
+
+        checkVal :: Bool
+        checkVal = txOutValue txOut == val
+
     -- Value paid to has to be exact ada but this causes issues with validation so we use Value.geq which also its own issues.
     checkValuePaidTo :: PubKeyHash -> Integer -> Bool
-    checkValuePaidTo pkh amt = Value.geq (valuePaidTo info pkh) (Ada.lovelaceValueOf amt)
+    checkValuePaidTo pkh amt = checkTxOutForValueAtPKH (txInfoOutputs info) pkh (Ada.lovelaceValueOf amt)
 
     -- Loop the pkh and amount lists, checking each case.
     checkAllPayments :: [PubKeyHash] -> [Integer] -> Bool
-    checkAllPayments []     []     = True
-    checkAllPayments []     _      = True
-    checkAllPayments _      []     = True
-    checkAllPayments (x:xs) (y:ys)
-      | checkValuePaidTo x y = checkAllPayments xs ys
-      | otherwise            = traceIfFalse "A Member Of The Group Is Not Being Paid." $ False
+    checkAllPayments [] [] = True
+    checkAllPayments [] _  = True -- leftover goes back as change
+    checkAllPayments _  [] = True -- leftover goes back as change
+    checkAllPayments (pkh:pkhs) (amt:amts)
+      | checkValuePaidTo pkh amt = checkAllPayments pkhs amts
+      | otherwise                = traceIfFalse "A Member Of The Group Is Not Being Paid." False
 
     -- Force a single utxo has a datum hash in the inputs by checking the length of the inputs that have a datum hash.
     oneScriptInput :: Bool
@@ -142,13 +155,14 @@ mkValidator _ datum _ context = oneScriptInput && checkAllPayments (cdtGroupPKHs
         loopInputs (x:xs) !counter = case txOutDatumHash $ txInInfoResolved x of
             Nothing -> do
               if counter > 1
-                then loopInputs [] counter
-                else loopInputs xs counter
-            Just _  -> do
+              then loopInputs [] counter
+              else loopInputs xs counter
+            Just _  ->  do
               if counter > 1
-                then loopInputs [] counter
-                else loopInputs xs (counter + 1)
-
+              then loopInputs [] counter
+              else loopInputs xs (counter + 1)
+      
+-- End of validator
         
 -------------------------------------------------------------------------------
 -- | This determines the data type for Datum and Redeemer.
@@ -225,7 +239,7 @@ checkDatumInputs pkhs amts = do
   ; all (==(True :: Bool)) [a,b,c,d]
   }
 
--- | The buy endpoint.
+-- | The smoosh endpoint.
 smoosh :: AsContractError e => Promise () Schema e ()
 smoosh =  endpoint @"smoosh" @CustomDatumType $ \CustomDatumType {cdtGroupPKHs=cdtGroupPKHs, cdtPayouts=cdtPayouts} -> do
   miner <- Plutus.Contract.ownPubKeyHash

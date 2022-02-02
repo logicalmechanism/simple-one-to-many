@@ -1,6 +1,6 @@
 cradle:
   cabal:
     - path: "./group-payout/src"
-      component: "group-payout:lib:grouop-payout"
+      component: "group-payout:lib:group-payout"
     - path: "./group-payout/pab"
       component: "group-payout:exe:plutus-starter-pab"
